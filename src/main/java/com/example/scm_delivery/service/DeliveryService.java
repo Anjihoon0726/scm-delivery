@@ -8,6 +8,7 @@ import com.example.scm_delivery.repository.DeliveryRepository;
 import com.example.scm_delivery.repository.LocationLogRepository;
 import com.example.scm_delivery.repository.PodRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,7 +24,10 @@ public class DeliveryService {
     private final LocationLogRepository locationLogRepository;
     private final PodRepository podRepository;
 
-    // 1. 배송 등록
+    // Kafka 연동을 위한 Template 주입 (추가)
+    private final KafkaTemplate<String, String> kafkaTemplate;
+
+    // 1. 배송 등록 (POST /api/waybills 수신건)
     @Transactional
     public Delivery createDelivery(String deliveryId, String outboundId) {
         Delivery delivery = new Delivery(deliveryId, outboundId);
@@ -54,7 +58,7 @@ public class DeliveryService {
         return locationLogRepository.findByDeliveryIdOrderByLoggedAtDesc(deliveryId);
     }
 
-    // 6. 인도 증빙(POD) 등록 및 배송 완료 처리
+    // 6. 인도 증빙(POD) 등록 및 배송 완료 처리 (+ Kafka 이벤트 발행 추가)
     @Transactional
     public Pod completeDeliveryWithPod(String deliveryId, String s3ImageUrl) {
         // 배송건 존재 확인
@@ -65,7 +69,12 @@ public class DeliveryService {
 
         // POD 증빙 생성 및 저장
         Pod pod = new Pod(deliveryId, s3ImageUrl);
-        return podRepository.save(pod);
+        Pod savedPod = podRepository.save(pod);
+
+        // 🌟 [추가] Kafka(MSK)로 배송완료 이벤트 발행 -> Notice(Slack) 모듈로 전달
+        kafkaTemplate.send("delivery-events", "DELIVERY_COMPLETED:" + deliveryId);
+
+        return savedPod;
     }
 
     // 7. 인도 증빙 조회
