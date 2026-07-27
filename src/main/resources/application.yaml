@@ -13,6 +13,18 @@ spring:
         format_sql: true
     show-sql: true
 
+  # 🌟 [3단계 추가] Kafka 설정
+  kafka:
+    bootstrap-servers: localhost:9092 # MSK/Kafka 클러스터 서버 주소
+    consumer:
+      group-id: delivery-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
 springdoc:
   api-docs:
     enabled: true

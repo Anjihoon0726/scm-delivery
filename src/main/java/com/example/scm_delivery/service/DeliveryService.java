@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -23,14 +24,18 @@ public class DeliveryService {
     private final DeliveryRepository deliveryRepository;
     private final LocationLogRepository locationLogRepository;
     private final PodRepository podRepository;
-
-    // Kafka 연동을 위한 Template 주입 (추가)
     private final KafkaTemplate<String, String> kafkaTemplate;
 
-    // 1. 배송 등록 (POST /api/waybills 수신건)
+    // 1. 배송 등록 및 송장 번호 규칙 적용 (DLV-택배사코드-NNNNN)
     @Transactional
-    public Delivery createDelivery(String deliveryId, String outboundId) {
-        Delivery delivery = new Delivery(deliveryId, outboundId);
+    public Delivery createDelivery(String orderId, String outboundId, String courierCode) {
+        String deliveryId = "DLV-" + UUID.randomUUID().toString().substring(0, 8);
+
+        // 🌟 [정의서 규격] DLV-택배사코드-NNNNN 규칙 적용 (예: DLV-CJ-99211)
+        int randomNumber = (int) (Math.random() * 90000) + 10000;
+        String trackingNumber = "DLV-" + (courierCode != null ? courierCode.toUpperCase() : "CJ") + "-" + randomNumber;
+
+        Delivery delivery = new Delivery(deliveryId, orderId, trackingNumber, outboundId);
         return deliveryRepository.save(delivery);
     }
 
@@ -39,10 +44,11 @@ public class DeliveryService {
         return deliveryRepository.findAll();
     }
 
-    // 3. 단건 배송 조회
-    public Delivery getDelivery(String deliveryId) {
-        return deliveryRepository.findById(deliveryId)
-                .orElseThrow(() -> new DeliveryException("해당 배송건이 존재하지 않습니다. id=" + deliveryId));
+    // 3. 송장 번호 또는 deliveryId 기반 단건 배송 조회
+    public Delivery getDelivery(String trackingNoOrId) {
+        return deliveryRepository.findByTrackingNumber(trackingNoOrId)
+                .orElseGet(() -> deliveryRepository.findById(trackingNoOrId)
+                        .orElseThrow(() -> new DeliveryException("해당 배송건이 존재하지 않습니다. identifier=" + trackingNoOrId)));
     }
 
     // 4. 실시간 위치 기록 저장
@@ -58,28 +64,28 @@ public class DeliveryService {
         return locationLogRepository.findByDeliveryIdOrderByLoggedAtDesc(deliveryId);
     }
 
-    // 6. 인도 증빙(POD) 등록 및 배송 완료 처리 (+ Kafka 이벤트 발행 추가)
+    // 6. 인도 증빙(POD) 등록 및 배송 완료 처리 (송장 번호 기반)
     @Transactional
-    public Pod completeDeliveryWithPod(String deliveryId, String s3ImageUrl) {
-        // 배송건 존재 확인
-        Delivery delivery = getDelivery(deliveryId);
+    public Pod completeDeliveryWithPod(String trackingNumber, String s3ImageUrl) {
+        Delivery delivery = getDelivery(trackingNumber);
 
-        // 배송 상태를 완료(COMPLETED)로 변경
+        // 배송 상태 완료(DELIVERED) 변경 및 시간 기록
         delivery.complete();
 
         // POD 증빙 생성 및 저장
-        Pod pod = new Pod(deliveryId, s3ImageUrl);
+        Pod pod = new Pod(delivery.getDeliveryId(), s3ImageUrl);
         Pod savedPod = podRepository.save(pod);
 
-        // 🌟 [추가] Kafka(MSK)로 배송완료 이벤트 발행 -> Notice(Slack) 모듈로 전달
-        kafkaTemplate.send("delivery-events", "DELIVERY_COMPLETED:" + deliveryId);
+        // Kafka 배송완료 이벤트 발행
+        kafkaTemplate.send("delivery-events", "DELIVERY_COMPLETED:" + delivery.getDeliveryId());
 
         return savedPod;
     }
 
     // 7. 인도 증빙 조회
-    public Pod getPod(String deliveryId) {
-        return podRepository.findByDeliveryId(deliveryId)
-                .orElseThrow(() -> new DeliveryException("해당 배송건의 인도 증빙 정보가 없습니다. id=" + deliveryId));
+    public Pod getPod(String trackingNoOrId) {
+        Delivery delivery = getDelivery(trackingNoOrId);
+        return podRepository.findByDeliveryId(delivery.getDeliveryId())
+                .orElse(null);
     }
 }
