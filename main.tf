@@ -4,6 +4,14 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.0"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.0"
+    }
   }
 }
 
@@ -41,21 +49,21 @@ data "aws_route_tables" "msk_route_tables" {
 # 1. Delivery VPC 및 서브넷 네트워크 구축 (10.50.0.0/16)
 # ==========================================
 
-resource "aws_vpc" "scm_vpc" {
+resource "aws_vpc" "dlv_vpc" {
   cidr_block           = "10.50.0.0/16"
   enable_dns_hostnames = true
   enable_dns_support   = true
 
   tags = {
-    Name = "scm-delivery-vpc"
+    Name = "dlv-vpc"
   }
 }
 
-resource "aws_internet_gateway" "scm_igw" {
-  vpc_id = aws_vpc.scm_vpc.id
+resource "aws_internet_gateway" "dlv_igw" {
+  vpc_id = aws_vpc.dlv_vpc.id
 
   tags = {
-    Name = "scm-delivery-igw"
+    Name = "dlv-igw"
   }
 }
 
@@ -64,160 +72,160 @@ resource "aws_eip" "nat_eip" {
   domain = "vpc"
 
   tags = {
-    Name = "scm-nat-eip"
+    Name = "dlv-nat-eip"
   }
 }
 
-resource "aws_nat_gateway" "scm_nat" {
+resource "aws_nat_gateway" "dlv_nat" {
   allocation_id = aws_eip.nat_eip.id
-  subnet_id     = aws_subnet.scm_public_subnet_a.id
+  subnet_id     = aws_subnet.dlv_public_subnet_a.id
 
   tags = {
-    Name = "scm-delivery-nat"
+    Name = "dlv-nat"
   }
 
-  depends_on = [aws_internet_gateway.scm_igw]
+  depends_on = [aws_internet_gateway.dlv_igw]
 }
 
 # 서브넷 설정
-resource "aws_subnet" "scm_public_subnet_a" {
-  vpc_id                  = aws_vpc.scm_vpc.id
+resource "aws_subnet" "dlv_public_subnet_a" {
+  vpc_id                  = aws_vpc.dlv_vpc.id
   cidr_block              = "10.50.10.0/24"
   availability_zone       = "ap-northeast-2a"
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                     = "scm-public-subnet-2a"
-    "kubernetes.io/role/elb"                = "1"
-    "kubernetes.io/cluster/scm-delivery-eks" = "shared"
+    Name                                     = "dlv-public-subnet-2a"
+    "kubernetes.io/role/elb"                 = "1"
+    "kubernetes.io/cluster/dlv-eks"          = "shared"
   }
 }
 
-resource "aws_subnet" "scm_public_subnet_c" {
-  vpc_id                  = aws_vpc.scm_vpc.id
+resource "aws_subnet" "dlv_public_subnet_c" {
+  vpc_id                  = aws_vpc.dlv_vpc.id
   cidr_block              = "10.50.11.0/24"
   availability_zone       = "ap-northeast-2c"
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                     = "scm-public-subnet-2c"
-    "kubernetes.io/role/elb"                = "1"
-    "kubernetes.io/cluster/scm-delivery-eks" = "shared"
+    Name                                     = "dlv-public-subnet-2c"
+    "kubernetes.io/role/elb"                 = "1"
+    "kubernetes.io/cluster/dlv-eks"          = "shared"
   }
 }
 
-resource "aws_subnet" "scm_private_subnet_a" {
-  vpc_id            = aws_vpc.scm_vpc.id
+resource "aws_subnet" "dlv_private_subnet_a" {
+  vpc_id            = aws_vpc.dlv_vpc.id
   cidr_block        = "10.50.20.0/24"
   availability_zone = "ap-northeast-2a"
 
   tags = {
-    Name                                     = "scm-private-subnet-2a"
-    "kubernetes.io/role/internal-elb"       = "1"
-    "kubernetes.io/cluster/scm-delivery-eks" = "shared"
+    Name                                     = "dlv-private-subnet-2a"
+    "kubernetes.io/role/internal-elb"        = "1"
+    "kubernetes.io/cluster/dlv-eks"          = "shared"
   }
 }
 
-resource "aws_subnet" "scm_private_subnet_c" {
-  vpc_id            = aws_vpc.scm_vpc.id
+resource "aws_subnet" "dlv_private_subnet_c" {
+  vpc_id            = aws_vpc.dlv_vpc.id
   cidr_block        = "10.50.21.0/24"
   availability_zone = "ap-northeast-2c"
 
   tags = {
-    Name                                     = "scm-private-subnet-2c"
-    "kubernetes.io/role/internal-elb"       = "1"
-    "kubernetes.io/cluster/scm-delivery-eks" = "shared"
+    Name                                     = "dlv-private-subnet-2c"
+    "kubernetes.io/role/internal-elb"        = "1"
+    "kubernetes.io/cluster/dlv-eks"          = "shared"
   }
 }
 
 # 퍼블릭 라우팅 테이블
-resource "aws_route_table" "scm_public_rt" {
-  vpc_id = aws_vpc.scm_vpc.id
+resource "aws_route_table" "dlv_public_rt" {
+  vpc_id = aws_vpc.dlv_vpc.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.scm_igw.id
+    gateway_id = aws_internet_gateway.dlv_igw.id
   }
 
   route {
     cidr_block                = "10.100.0.0/16"
-    vpc_peering_connection_id = aws_vpc_peering_connection.msk_peering.id
+    vpc_peering_connection_id = aws_vpc_peering_connection.dlv_msk_peering.id
   }
 
   tags = {
-    Name = "scm-public-rt"
+    Name = "dlv-public-rt"
   }
 }
 
-resource "aws_route_table_association" "scm_rta_pub_a" {
-  subnet_id      = aws_subnet.scm_public_subnet_a.id
-  route_table_id = aws_route_table.scm_public_rt.id
+resource "aws_route_table_association" "dlv_rta_pub_a" {
+  subnet_id      = aws_subnet.dlv_public_subnet_a.id
+  route_table_id = aws_route_table.dlv_public_rt.id
 }
 
-resource "aws_route_table_association" "scm_rta_pub_c" {
-  subnet_id      = aws_subnet.scm_public_subnet_c.id
-  route_table_id = aws_route_table.scm_public_rt.id
+resource "aws_route_table_association" "dlv_rta_pub_c" {
+  subnet_id      = aws_subnet.dlv_public_subnet_c.id
+  route_table_id = aws_route_table.dlv_public_rt.id
 }
 
 # 프라이빗 라우팅 테이블 (NAT GW 통한 아웃바운드 인터넷 제공)
-resource "aws_route_table" "scm_private_rt" {
-  vpc_id = aws_vpc.scm_vpc.id
+resource "aws_route_table" "dlv_private_rt" {
+  vpc_id = aws_vpc.dlv_vpc.id
 
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.scm_nat.id
+    nat_gateway_id = aws_nat_gateway.dlv_nat.id
   }
 
   route {
     cidr_block                = "10.100.0.0/16"
-    vpc_peering_connection_id = aws_vpc_peering_connection.msk_peering.id
+    vpc_peering_connection_id = aws_vpc_peering_connection.dlv_msk_peering.id
   }
 
   tags = {
-    Name = "scm-private-rt"
+    Name = "dlv-private-rt"
   }
 }
 
-resource "aws_route_table_association" "scm_rta_pri_a" {
-  subnet_id      = aws_subnet.scm_private_subnet_a.id
-  route_table_id = aws_route_table.scm_private_rt.id
+resource "aws_route_table_association" "dlv_rta_pri_a" {
+  subnet_id      = aws_subnet.dlv_private_subnet_a.id
+  route_table_id = aws_route_table.dlv_private_rt.id
 }
 
-resource "aws_route_table_association" "scm_rta_pri_c" {
-  subnet_id      = aws_subnet.scm_private_subnet_c.id
-  route_table_id = aws_route_table.scm_private_rt.id
+resource "aws_route_table_association" "dlv_rta_pri_c" {
+  subnet_id      = aws_subnet.dlv_private_subnet_c.id
+  route_table_id = aws_route_table.dlv_private_rt.id
 }
 
-resource "aws_db_subnet_group" "scm_rds_subnet_group" {
-  name       = "scm-rds-subnet-group"
-  subnet_ids = [aws_subnet.scm_private_subnet_a.id, aws_subnet.scm_private_subnet_c.id]
+resource "aws_db_subnet_group" "dlv_rds_subnet_group" {
+  name       = "dlv-rds-subnet-group"
+  subnet_ids = [aws_subnet.dlv_private_subnet_a.id, aws_subnet.dlv_private_subnet_c.id]
 
   tags = {
-    Name = "scm-rds-subnet-group"
+    Name = "dlv-rds-subnet-group"
   }
 }
 
-resource "aws_elasticache_subnet_group" "scm_redis_subnet_group" {
-  name       = "scm-redis-subnet-group"
-  subnet_ids = [aws_subnet.scm_private_subnet_a.id, aws_subnet.scm_private_subnet_c.id]
+resource "aws_elasticache_subnet_group" "dlv_redis_subnet_group" {
+  name       = "dlv-redis-subnet-group"
+  subnet_ids = [aws_subnet.dlv_private_subnet_a.id, aws_subnet.dlv_private_subnet_c.id]
 }
 
 # ==========================================
 # 2. VPC Peering 연동 및 양방향 라우팅
 # ==========================================
 
-resource "aws_vpc_peering_connection" "msk_peering" {
-  vpc_id      = aws_vpc.scm_vpc.id
+resource "aws_vpc_peering_connection" "dlv_msk_peering" {
+  vpc_id      = aws_vpc.dlv_vpc.id
   peer_vpc_id = data.aws_vpc.msk_vpc.id
   auto_accept = true
 
   tags = {
-    Name = "scm-to-msk-peering"
+    Name = "dlv-to-msk-peering"
   }
 }
 
-resource "aws_vpc_peering_connection_options" "msk_peering_options" {
-  vpc_peering_connection_id = aws_vpc_peering_connection.msk_peering.id
+resource "aws_vpc_peering_connection_options" "dlv_msk_peering_options" {
+  vpc_peering_connection_id = aws_vpc_peering_connection.dlv_msk_peering.id
 
   accepter {
     allow_remote_vpc_dns_resolution = true
@@ -228,21 +236,21 @@ resource "aws_vpc_peering_connection_options" "msk_peering_options" {
   }
 }
 
-resource "aws_route" "msk_vpc_return_route" {
+resource "aws_route" "dlv_msk_return_route" {
   for_each                  = toset(data.aws_route_tables.msk_route_tables.ids)
   route_table_id            = each.value
   destination_cidr_block    = "10.50.0.0/16"
-  vpc_peering_connection_id = aws_vpc_peering_connection.msk_peering.id
+  vpc_peering_connection_id = aws_vpc_peering_connection.dlv_msk_peering.id
 }
 
 # ==========================================
 # 3. 보안 그룹(Security Group) 설정
 # ==========================================
 
-resource "aws_security_group" "rds_sg" {
-  name        = "scm-rds-sg"
+resource "aws_security_group" "dlv_rds_sg" {
+  name        = "dlv-rds-sg"
   description = "Security Group for Private PostgreSQL RDS"
-  vpc_id      = aws_vpc.scm_vpc.id
+  vpc_id      = aws_vpc.dlv_vpc.id
 
   ingress {
     from_port   = 15432
@@ -259,10 +267,10 @@ resource "aws_security_group" "rds_sg" {
   }
 }
 
-resource "aws_security_group" "redis_sg" {
-  name        = "scm-redis-sg"
+resource "aws_security_group" "dlv_redis_sg" {
+  name        = "dlv-redis-sg"
   description = "Security Group for Private ElastiCache Redis"
-  vpc_id      = aws_vpc.scm_vpc.id
+  vpc_id      = aws_vpc.dlv_vpc.id
 
   ingress {
     from_port   = 16379
@@ -284,12 +292,12 @@ resource "aws_security_group" "redis_sg" {
 # ==========================================
 
 resource "aws_secretsmanager_secret" "db_secret" {
-  name                    = "scm/delivery/db-credentials"
+  name                    = "dlv/db-credentials"
   recovery_window_in_days = 0
 
   tags = {
     Environment = "dev"
-    Service     = "scm-delivery"
+    Service     = "dlv"
   }
 }
 
@@ -299,7 +307,7 @@ resource "aws_secretsmanager_secret_version" "db_secret_val" {
     username = "dlv_admin"
     password = "dlv_1234"
     engine   = "postgres"
-    host     = aws_db_instance.scm_postgres.address
+    host     = aws_db_instance.dlv_postgres.address
     port     = 15432
     dbname   = "db_delivery"
   })
@@ -309,8 +317,8 @@ resource "aws_secretsmanager_secret_version" "db_secret_val" {
 # 5. Database & Cache 구축 (PostgreSQL & Redis)
 # ==========================================
 
-resource "aws_db_instance" "scm_postgres" {
-  identifier             = "scm-postgres-db"
+resource "aws_db_instance" "dlv_postgres" {
+  identifier             = "dlv-postgres-db"
   allocated_storage      = 20
   max_allocated_storage  = 50
   engine                 = "postgres"
@@ -320,28 +328,28 @@ resource "aws_db_instance" "scm_postgres" {
   db_name                = "db_delivery"
   username               = "dlv_admin"
   password               = "dlv_1234"
-  db_subnet_group_name   = aws_db_subnet_group.scm_rds_subnet_group.name
-  vpc_security_group_ids = [aws_security_group.rds_sg.id]
+  db_subnet_group_name   = aws_db_subnet_group.dlv_rds_subnet_group.name
+  vpc_security_group_ids = [aws_security_group.dlv_rds_sg.id]
   publicly_accessible    = false
   skip_final_snapshot    = true
 
   tags = {
-    Name = "scm-delivery-postgres"
+    Name = "dlv-postgres"
   }
 }
 
-resource "aws_elasticache_cluster" "scm_redis" {
-  cluster_id           = "scm-redis-cluster"
+resource "aws_elasticache_cluster" "dlv_redis" {
+  cluster_id           = "dlv-redis-cluster"
   engine               = "redis"
   node_type            = "cache.t3.micro"
   num_cache_nodes      = 1
   parameter_group_name = "default.redis7"
   port                 = 16379
-  subnet_group_name    = aws_elasticache_subnet_group.scm_redis_subnet_group.name
-  security_group_ids   = [aws_security_group.redis_sg.id]
+  subnet_group_name    = aws_elasticache_subnet_group.dlv_redis_subnet_group.name
+  security_group_ids   = [aws_security_group.dlv_redis_sg.id]
 
   tags = {
-    Name = "scm-delivery-redis"
+    Name = "dlv-redis"
   }
 }
 
@@ -349,8 +357,8 @@ resource "aws_elasticache_cluster" "scm_redis" {
 # 6. EKS IAM 역할 설정
 # ==========================================
 
-resource "aws_iam_role" "scm_eks_cluster_role" {
-  name = "scm-eks-cluster-role"
+resource "aws_iam_role" "dlv_eks_cluster_role" {
+  name = "dlv-eks-cluster-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -368,11 +376,11 @@ resource "aws_iam_role" "scm_eks_cluster_role" {
 
 resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-  role       = aws_iam_role.scm_eks_cluster_role.name
+  role       = aws_iam_role.dlv_eks_cluster_role.name
 }
 
-resource "aws_iam_role" "scm_eks_node_role" {
-  name = "scm-eks-node-role"
+resource "aws_iam_role" "dlv_eks_node_role" {
+  name = "dlv-eks-node-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -390,32 +398,72 @@ resource "aws_iam_role" "scm_eks_node_role" {
 
 resource "aws_iam_role_policy_attachment" "eks_worker_node_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
-  role       = aws_iam_role.scm_eks_node_role.name
+  role       = aws_iam_role.dlv_eks_node_role.name
 }
 
 resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-  role       = aws_iam_role.scm_eks_node_role.name
+  role       = aws_iam_role.dlv_eks_node_role.name
 }
 
 resource "aws_iam_role_policy_attachment" "eks_container_registry_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-  role       = aws_iam_role.scm_eks_node_role.name
+  role       = aws_iam_role.dlv_eks_node_role.name
+}
+
+# AWS Load Balancer Controller 권한 (EKS 노드 역할에 추가)
+# AWSLoadBalancerControllerIAMPolicy는 AWS 관리형 정책이 아니라, 공식 문서에서 제공하는
+# JSON을 직접 IAM 정책으로 만들어 붙여야 함 (kubernetes-sigs/aws-load-balancer-controller v2.14.1 기준)
+resource "aws_iam_policy" "alb_controller_policy" {
+  name        = "AWSLoadBalancerControllerIAMPolicy"
+  description = "IAM policy for AWS Load Balancer Controller (kubernetes-sigs 공식 문서 기준)"
+  policy      = file("${path.module}/alb_controller_iam_policy.json")
+}
+
+resource "aws_iam_role_policy_attachment" "eks_node_alb_controller_policy" {
+  policy_arn = aws_iam_policy.alb_controller_policy.arn
+  role       = aws_iam_role.dlv_eks_node_role.name
+}
+
+# ExternalDNS를 위한 Route 53 IAM 권한 추가
+resource "aws_iam_role_policy" "eks_node_route53_access" {
+  name = "external-dns-route53-access"
+  role = aws_iam_role.dlv_eks_node_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["route53:ChangeResourceRecordSets"]
+        Resource = "arn:aws:route53:::hostedzone/Z1044783PWW9R75I2WV6"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "route53:ListHostedZones",
+          "route53:ListResourceRecordSets",
+          "route53:ListTagsForResource"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
 }
 
 # ==========================================
 # 7. EKS Control Plane & Node Group 생성
 # ==========================================
 
-resource "aws_eks_cluster" "scm_eks" {
-  name     = "scm-delivery-eks"
-  role_arn = aws_iam_role.scm_eks_cluster_role.arn
+resource "aws_eks_cluster" "dlv_eks" {
+  name     = "dlv-eks"
+  role_arn = aws_iam_role.dlv_eks_cluster_role.arn
   version  = "1.31"
 
   vpc_config {
     subnet_ids = [
-      aws_subnet.scm_private_subnet_a.id,
-      aws_subnet.scm_private_subnet_c.id
+      aws_subnet.dlv_private_subnet_a.id,
+      aws_subnet.dlv_private_subnet_c.id
     ]
     endpoint_private_access = true
     endpoint_public_access  = true
@@ -426,18 +474,18 @@ resource "aws_eks_cluster" "scm_eks" {
   ]
 
   tags = {
-    Name = "scm-delivery-eks"
+    Name = "dlv-eks"
   }
 }
 
-resource "aws_eks_node_group" "scm_node_group" {
-  cluster_name    = aws_eks_cluster.scm_eks.name
-  node_group_name = "scm-delivery-node-group"
-  node_role_arn   = aws_iam_role.scm_eks_node_role.arn
+resource "aws_eks_node_group" "dlv_node_group" {
+  cluster_name    = aws_eks_cluster.dlv_eks.name
+  node_group_name = "dlv-node-group"
+  node_role_arn   = aws_iam_role.dlv_eks_node_role.arn
 
   subnet_ids = [
-    aws_subnet.scm_private_subnet_a.id,
-    aws_subnet.scm_private_subnet_c.id
+    aws_subnet.dlv_private_subnet_a.id,
+    aws_subnet.dlv_private_subnet_c.id
   ]
 
   instance_types = ["t3.medium"]
@@ -456,10 +504,16 @@ resource "aws_eks_node_group" "scm_node_group" {
     aws_iam_role_policy_attachment.eks_worker_node_policy,
     aws_iam_role_policy_attachment.eks_cni_policy,
     aws_iam_role_policy_attachment.eks_container_registry_policy,
+    aws_iam_role_policy_attachment.eks_node_alb_controller_policy,
+    aws_nat_gateway.dlv_nat,
+    aws_route_table_association.dlv_rta_pri_a,
+    aws_route_table_association.dlv_rta_pri_c,
+    aws_route_table_association.dlv_rta_pub_a,
+    aws_route_table_association.dlv_rta_pub_c
   ]
 
   tags = {
-    Name = "scm-delivery-worker-node"
+    Name = "dlv-worker-node"
   }
 }
 
@@ -474,37 +528,37 @@ data "aws_route53_zone" "scm_zone" {
 
 resource "aws_route53_record" "db_record" {
   zone_id         = data.aws_route53_zone.scm_zone.zone_id
-  name            = "db.${data.aws_route53_zone.scm_zone.name}"
+  name            = "dlvdb.${data.aws_route53_zone.scm_zone.name}"
   type            = "CNAME"
   ttl             = 300
   allow_overwrite = true
 
-  records = [element(split(":", aws_db_instance.scm_postgres.endpoint), 0)]
+  records = [element(split(":", aws_db_instance.dlv_postgres.endpoint), 0)]
 }
 
 resource "aws_route53_record" "redis_record" {
   zone_id         = data.aws_route53_zone.scm_zone.zone_id
-  name            = "redis.${data.aws_route53_zone.scm_zone.name}"
+  name            = "dlvredis.${data.aws_route53_zone.scm_zone.name}"
   type            = "CNAME"
   ttl             = 300
   allow_overwrite = true
 
-  records = [aws_elasticache_cluster.scm_redis.cache_nodes[0].address]
+  records = [aws_elasticache_cluster.dlv_redis.cache_nodes[0].address]
 }
 
 # ==========================================
 # 9. MSK 연동
 # ==========================================
-# Route 53 프라이빗 존 연동은 담당자 확인 결과 zone 자체가 삭제되어 있어 조회가 불가능하므로 제거함
-# (SCM/MSK는 동일 계정(967996001868)으로 확인됨 - 계정 문제는 아니었음).
-# SASL/SCRAM 인증 + TLS 암호화(포트 9096, SASL_SSL) + AWS Secrets Manager 연동 시크릿(사용자명/비밀번호)
-# 방식으로 연동한다. 같은 계정이므로 시크릿 리소스 정책 수정 없이 아래 IAM 정책만으로 접근 가능하다.
-# 부트스트랩 브로커 주소는 VPC 피어링(aws_vpc_peering_connection.msk_peering)을 통한 사설 IP 통신으로 접근한다.
-# (2026-08-06 기준, MSK 콘솔 "클라이언트 정보 보기"에서 확인한 SASL/SCRAM 프라이빗 엔드포인트,
-#  브로커 IP가 바뀌면 이 값도 다시 갱신해야 함)
 
 locals {
-  msk_bootstrap_brokers_sasl_scram = "b-3.hcscmmsk.un6rv7.c3.kafka.ap-northeast-2.amazonaws.com:9096,b-1.hcscmmsk.un6rv7.c3.kafka.ap-northeast-2.amazonaws.com:9096,b-2.hcscmmsk.un6rv7.c3.kafka.ap-northeast-2.amazonaws.com:9096"
+  msk_bootstrap_brokers_sasl_scram = "b-1.hcscmmsk.qhxzwx.c3.kafka.ap-northeast-2.amazonaws.com:9096,b-2.hcscmmsk.qhxzwx.c3.kafka.ap-northeast-2.amazonaws.com:9096,b-3.hcscmmsk.qhxzwx.c3.kafka.ap-northeast-2.amazonaws.com:9096"
+
+  # (2026-08-07 기준, aws kafka list-nodes로 확인한 실제 브로커 IP)
+  msk_broker_ips = {
+    "b-1.hcscmmsk" = "10.100.10.70"
+    "b-2.hcscmmsk" = "10.100.12.194"
+    "b-3.hcscmmsk" = "10.100.11.127"
+  }
 }
 
 variable "msk_scram_secret_arn" {
@@ -513,8 +567,32 @@ variable "msk_scram_secret_arn" {
   default     = "arn:aws:secretsmanager:ap-northeast-2:967996001868:secret:AmazonMSK_hc-scm-msk_DLV-r31ySM"
 }
 
+# VPC Peering의 allow_remote_vpc_dns_resolution은 EC2 프라이빗 DNS 이름만 상대 VPC에 풀어주고,
+# MSK 같은 AWS 관리형 서비스 엔드포인트(브로커 도메인)는 그 리소스가 속한 VPC(mgmt-vpc) 안에서만
+# 자동으로 이름이 풀린다. 그래서 dlv-vpc 전용으로 브로커 이름을 풀어줄 프라이빗 존을 직접 만든다.
+# 주의: 브로커가 교체(재시작/스케일링)되면 IP가 바뀔 수 있어 이 레코드도 함께 갱신해야 한다.
+resource "aws_route53_zone" "dlv_msk_broker_zone" {
+  name = "qhxzwx.c3.kafka.ap-northeast-2.amazonaws.com"
+
+  vpc {
+    vpc_id = aws_vpc.dlv_vpc.id
+  }
+
+  comment = "DLV에서 MSK 브로커 도메인을 풀기 위한 프라이빗 존 (VPC Peering DNS 한계 우회)"
+}
+
+resource "aws_route53_record" "dlv_msk_broker_a" {
+  for_each = local.msk_broker_ips
+
+  zone_id = aws_route53_zone.dlv_msk_broker_zone.zone_id
+  name    = "${each.key}.qhxzwx.c3.kafka.ap-northeast-2.amazonaws.com"
+  type    = "A"
+  ttl     = 60
+  records = [each.value]
+}
+
 resource "aws_ssm_parameter" "msk_bootstrap_brokers" {
-  name        = "/scm/msk/bootstrap-brokers-sasl-scram"
+  name        = "/dlv/msk/bootstrap-brokers-sasl-scram"
   description = "MSK bootstrap brokers (SASL/SCRAM over TLS, private endpoint, port 9096)"
   type        = "String"
   value       = local.msk_bootstrap_brokers_sasl_scram
@@ -524,10 +602,9 @@ resource "aws_ssm_parameter" "msk_bootstrap_brokers" {
   }
 }
 
-# 앱(EKS 노드 역할)이 부트스트랩 주소(SSM)와 SASL/SCRAM 인증 정보(Secrets Manager)를 읽을 수 있도록 권한 부여
 resource "aws_iam_role_policy" "eks_node_msk_scram_access" {
   name = "msk-scram-auth-access"
-  role = aws_iam_role.scm_eks_node_role.id
+  role = aws_iam_role.dlv_eks_node_role.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -546,4 +623,171 @@ resource "aws_iam_role_policy" "eks_node_msk_scram_access" {
       }
     ]
   })
+}
+
+# ==========================================
+# 10. Helm Provider & Controller / ExternalDNS 배포
+# ==========================================
+
+provider "helm" {
+  kubernetes {
+    host                   = aws_eks_cluster.dlv_eks.endpoint
+    cluster_ca_certificate = base64decode(aws_eks_cluster.dlv_eks.certificate_authority[0].data)
+
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.dlv_eks.name]
+      command     = "aws"
+    }
+  }
+}
+
+# AWS Load Balancer Controller 배포
+resource "helm_release" "aws_load_balancer_controller" {
+  name             = "aws-load-balancer-controller"
+  repository       = "https://aws.github.io/eks-charts"
+  chart            = "aws-load-balancer-controller"
+  version          = "1.8.1"
+  namespace        = "kube-system"
+  timeout          = 600
+
+  set {
+    name  = "clusterName"
+    value = aws_eks_cluster.dlv_eks.name
+  }
+
+  set {
+    name  = "serviceAccount.create"
+    value = "true"
+  }
+
+  set {
+    name  = "serviceAccount.name"
+    value = "aws-load-balancer-controller"
+  }
+
+  set {
+    name  = "region"
+    value = "ap-northeast-2"
+  }
+
+  set {
+    name  = "vpcId"
+    value = aws_vpc.dlv_vpc.id
+  }
+
+  set {
+    name  = "hostNetwork"
+    value = "true"
+  }
+
+  depends_on = [
+    aws_eks_node_group.dlv_node_group
+  ]
+}
+
+# ExternalDNS 배포
+resource "helm_release" "external_dns" {
+  name             = "external-dns"
+  repository       = "https://kubernetes-sigs.github.io/external-dns"
+  chart            = "external-dns"
+  version          = "1.15.2"
+  namespace        = "kube-system"
+  create_namespace = false
+  timeout          = 600
+
+  set {
+    name  = "provider.name"
+    value = "aws"
+  }
+
+  set {
+    name  = "aws.zoneType"
+    value = "public"
+  }
+
+  set {
+    name  = "txtOwnerId"
+    value = data.aws_route53_zone.scm_zone.zone_id
+  }
+
+  set {
+    name  = "policy"
+    value = "sync"
+  }
+
+  set {
+    name  = "env[0].name"
+    value = "AWS_REGION"
+  }
+
+  set {
+    name  = "env[0].value"
+    value = "ap-northeast-2"
+  }
+
+  depends_on = [
+    aws_eks_node_group.dlv_node_group,
+    aws_iam_role_policy.eks_node_route53_access
+  ]
+}
+
+# 패치용 JSON 파일 생성
+resource "local_file" "external_dns_patch" {
+  filename = "${path.module}/patch.json"
+  content = jsonencode({
+    spec = {
+      template = {
+        spec = {
+          hostNetwork = true
+        }
+      }
+    }
+  })
+}
+
+# 외부 패치 적용 (--patch-file 사용)
+resource "null_resource" "patch_external_dns" {
+  depends_on = [helm_release.external_dns, local_file.external_dns_patch]
+
+  provisioner "local-exec" {
+    interpreter = ["PowerShell", "-Command"]
+    command     = "kubectl patch deployment external-dns -n kube-system --type=merge --patch-file '${path.module}/patch.json'"
+  }
+}
+
+# ==========================================
+# 11. Kubernetes Provider & Manifest 자동 배포
+# ==========================================
+
+provider "kubernetes" {
+  host                   = aws_eks_cluster.dlv_eks.endpoint
+  cluster_ca_certificate = base64decode(aws_eks_cluster.dlv_eks.certificate_authority[0].data)
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    args        = ["eks", "get-token", "--cluster-name", aws_eks_cluster.dlv_eks.name]
+    command     = "aws"
+  }
+}
+
+resource "kubernetes_manifest" "app_deployment" {
+  manifest = yamldecode(file("C:/teamproject/IntelliJ_IDEA/scm-delivery/k8s/deployment.yaml"))
+
+  depends_on = [aws_eks_node_group.dlv_node_group]
+}
+
+resource "kubernetes_manifest" "app_service" {
+  manifest = yamldecode(file("C:/teamproject/IntelliJ_IDEA/scm-delivery/k8s/service.yaml"))
+
+  depends_on = [kubernetes_manifest.app_deployment]
+}
+
+resource "kubernetes_manifest" "app_ingress" {
+  manifest = yamldecode(file("C:/teamproject/IntelliJ_IDEA/scm-delivery/k8s/ingress.yaml"))
+
+  depends_on = [
+    kubernetes_manifest.app_service,
+    helm_release.aws_load_balancer_controller
+  ]
 }
