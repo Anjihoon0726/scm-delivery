@@ -412,11 +412,9 @@ resource "aws_iam_role_policy_attachment" "eks_container_registry_policy" {
 }
 
 # AWS Load Balancer Controller 권한 (EKS 노드 역할에 추가)
-# AWSLoadBalancerControllerIAMPolicy는 AWS 관리형 정책이 아니라, 공식 문서에서 제공하는
-# JSON을 직접 IAM 정책으로 만들어 붙여야 함 (kubernetes-sigs/aws-load-balancer-controller v2.14.1 기준)
 resource "aws_iam_policy" "alb_controller_policy" {
   name        = "AWSLoadBalancerControllerIAMPolicy"
-  description = "IAM policy for AWS Load Balancer Controller (kubernetes-sigs 공식 문서 기준)"
+  description = "IAM policy for AWS Load Balancer Controller"
   policy      = file("${path.module}/alb_controller_iam_policy.json")
 }
 
@@ -528,7 +526,7 @@ data "aws_route53_zone" "scm_zone" {
 
 resource "aws_route53_record" "db_record" {
   zone_id         = data.aws_route53_zone.scm_zone.zone_id
-  name            = "dlvdb.${data.aws_route53_zone.scm_zone.name}"
+  name            = "dlv-db.${data.aws_route53_zone.scm_zone.name}" # dlv-db로 수정
   type            = "CNAME"
   ttl             = 300
   allow_overwrite = true
@@ -538,7 +536,7 @@ resource "aws_route53_record" "db_record" {
 
 resource "aws_route53_record" "redis_record" {
   zone_id         = data.aws_route53_zone.scm_zone.zone_id
-  name            = "dlvredis.${data.aws_route53_zone.scm_zone.name}"
+  name            = "dlv-redis.${data.aws_route53_zone.scm_zone.name}" # dlv-redis로 수정
   type            = "CNAME"
   ttl             = 300
   allow_overwrite = true
@@ -553,7 +551,6 @@ resource "aws_route53_record" "redis_record" {
 locals {
   msk_bootstrap_brokers_sasl_scram = "b-1.hcscmmsk.qhxzwx.c3.kafka.ap-northeast-2.amazonaws.com:9096,b-2.hcscmmsk.qhxzwx.c3.kafka.ap-northeast-2.amazonaws.com:9096,b-3.hcscmmsk.qhxzwx.c3.kafka.ap-northeast-2.amazonaws.com:9096"
 
-  # (2026-08-07 기준, aws kafka list-nodes로 확인한 실제 브로커 IP)
   msk_broker_ips = {
     "b-1.hcscmmsk" = "10.100.10.70"
     "b-2.hcscmmsk" = "10.100.12.194"
@@ -562,15 +559,11 @@ locals {
 }
 
 variable "msk_scram_secret_arn" {
-  description = "MSK 클러스터에 연동된 SASL/SCRAM 인증용 Secrets Manager 시크릿 ARN (사용 시크릿: AmazonMSK_hc-scm-msk_DLV, SCM/MSK 동일 계정 967996001868 소유)"
+  description = "MSK 클러스터에 연동된 SASL/SCRAM 인증용 Secrets Manager 시크릿 ARN"
   type        = string
   default     = "arn:aws:secretsmanager:ap-northeast-2:967996001868:secret:AmazonMSK_hc-scm-msk_DLV-r31ySM"
 }
 
-# VPC Peering의 allow_remote_vpc_dns_resolution은 EC2 프라이빗 DNS 이름만 상대 VPC에 풀어주고,
-# MSK 같은 AWS 관리형 서비스 엔드포인트(브로커 도메인)는 그 리소스가 속한 VPC(mgmt-vpc) 안에서만
-# 자동으로 이름이 풀린다. 그래서 dlv-vpc 전용으로 브로커 이름을 풀어줄 프라이빗 존을 직접 만든다.
-# 주의: 브로커가 교체(재시작/스케일링)되면 IP가 바뀔 수 있어 이 레코드도 함께 갱신해야 한다.
 resource "aws_route53_zone" "dlv_msk_broker_zone" {
   name = "qhxzwx.c3.kafka.ap-northeast-2.amazonaws.com"
 
@@ -642,7 +635,6 @@ provider "helm" {
   }
 }
 
-# AWS Load Balancer Controller 배포
 resource "helm_release" "aws_load_balancer_controller" {
   name             = "aws-load-balancer-controller"
   repository       = "https://aws.github.io/eks-charts"
@@ -686,7 +678,6 @@ resource "helm_release" "aws_load_balancer_controller" {
   ]
 }
 
-# ExternalDNS 배포
 resource "helm_release" "external_dns" {
   name             = "external-dns"
   repository       = "https://kubernetes-sigs.github.io/external-dns"
@@ -732,7 +723,6 @@ resource "helm_release" "external_dns" {
   ]
 }
 
-# 패치용 JSON 파일 생성
 resource "local_file" "external_dns_patch" {
   filename = "${path.module}/patch.json"
   content = jsonencode({
@@ -746,7 +736,6 @@ resource "local_file" "external_dns_patch" {
   })
 }
 
-# 외부 패치 적용 (--patch-file 사용)
 resource "null_resource" "patch_external_dns" {
   depends_on = [helm_release.external_dns, local_file.external_dns_patch]
 
@@ -790,4 +779,39 @@ resource "kubernetes_manifest" "app_ingress" {
     kubernetes_manifest.app_service,
     helm_release.aws_load_balancer_controller
   ]
+}
+
+# ==========================================
+# 12. ACM 인증서 발급 및 DNS 검증 추가
+# ==========================================
+
+resource "aws_acm_certificate" "cert" {
+  domain_name       = "dlv.project2-hc-scm.cloud"
+  validation_method = "DNS"
+
+  tags = {
+    Name = "dlv-cert"
+  }
+}
+
+resource "aws_route53_record" "cert_validation" {
+  for_each = {
+    for dvo in aws_acm_certificate.cert.domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = data.aws_route53_zone.scm_zone.zone_id
+}
+
+resource "aws_acm_certificate_validation" "cert" {
+  certificate_arn         = aws_acm_certificate.cert.arn
+  validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
 }
