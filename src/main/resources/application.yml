@@ -1,14 +1,13 @@
-# 기존 내용 아래에 추가
 spring:
   datasource:
     driver-class-name: org.postgresql.Driver
-    url: jdbc:postgresql://db.project2-hc-scm.cloud:15432/db_delivery
+    url: jdbc:postgresql://dlvdb.project2-hc-scm.cloud:15432/db_delivery
     username: dlv_admin
     password: dlv_1234
 
   data:
     redis:
-      host: redis.project2-hc-scm.cloud
+      host: dlvredis.project2-hc-scm.cloud
       port: 16379
 
   jpa:
@@ -20,7 +19,7 @@ spring:
     show-sql: false
 
   kafka:
-    bootstrap-servers: b-1.scmmsk.ymo1mq.c3.kafka.ap-northeast-2.amazonaws.com:9096,b-2.scmmsk.ymo1mq.c3.kafka.ap-northeast-2.amazonaws.com:9096,b-3.scmmsk.ymo1mq.c3.kafka.ap-northeast-2.amazonaws.com:9096
+    bootstrap-servers: "b-1.hcscmmsk.qhxzwx.c3.kafka.ap-northeast-2.amazonaws.com:9096,b-2.hcscmmsk.qhxzwx.c3.kafka.ap-northeast-2.amazonaws.com:9096,b-3.hcscmmsk.qhxzwx.c3.kafka.ap-northeast-2.amazonaws.com:9096"
 
     consumer:
       group-id: delivery-group
@@ -31,7 +30,7 @@ spring:
         spring.json.trusted.packages: "*"
         security.protocol: SASL_SSL
         sasl.mechanism: SCRAM-SHA-512
-        sasl.jaas.config: 'org.apache.kafka.common.security.scram.ScramLoginModule required username="scm-msk_DLV" password="CHIlx0xjZFypwUMg8Angy3Ym";'
+        sasl.jaas.config: org.apache.kafka.common.security.scram.ScramLoginModule required username='DLV' password='${MSK_PASSWORD:CHIlx0xjZFypwUMg8Angy3Ym}';
 
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -39,12 +38,12 @@ spring:
       properties:
         security.protocol: SASL_SSL
         sasl.mechanism: SCRAM-SHA-512
-        sasl.jaas.config: 'org.apache.kafka.common.security.scram.ScramLoginModule required username="scm-msk_DLV" password="CHIlx0xjZFypwUMg8Angy3Ym";'
+        sasl.jaas.config: org.apache.kafka.common.security.scram.ScramLoginModule required username='DLV' password='${MSK_PASSWORD:CHIlx0xjZFypwUMg8Angy3Ym}';
 
     properties:
       security.protocol: SASL_SSL
       sasl.mechanism: SCRAM-SHA-512
-      sasl.jaas.config: 'org.apache.kafka.common.security.scram.ScramLoginModule required username="scm-msk_DLV" password="CHIlx0xjZFypwUMg8Angy3Ym";'
+      sasl.jaas.config: org.apache.kafka.common.security.scram.ScramLoginModule required username='DLV' password='${MSK_PASSWORD:CHIlx0xjZFypwUMg8Angy3Ym}';
 
   cloud:
     aws:
@@ -56,9 +55,8 @@ spring:
       region:
         static: ap-northeast-2
 
-# 🚀 슬랙 알림 웹후크 연동 설정
 slack:
-  webhook-url: https://hooks.slack.com/services/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
+  webhook-url: ${SLACK_WEBHOOK_URL:https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK}
 
 springdoc:
   api-docs:
@@ -66,9 +64,6 @@ springdoc:
   swagger-ui:
     path: /swagger-ui/index.html
 
-# --------------------------------------------------
-# 📦 출발지 (창고/쇼핑몰) 고정 정보
-# --------------------------------------------------
 sender:
   name: "hc_scm"
   phone: "02-1234-5678"
